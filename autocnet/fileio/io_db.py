@@ -55,3 +55,20 @@ class StringToMission(Base):  # pragma: no cover
         self.key = key
         self.value = value
 
+class CameraParameters(Base): # pragma: no cover
+    """
+    Table mapping for ISIS Camera Models parameters
+    """
+    __tablename__ = 'isis_camera_parameters'
+    id = Column(Integer, primary_key=True)
+    mission = Column(String)
+    instrument = Column(String)
+    camera_parameters = Column(NestedJsonObject)
+
+    def __init__(self, mission, instrument, camera_parameters):
+        self.mission = mission
+        self.instrument = instrument
+        self.camera_parameters = camera_parameters
+
+
+

@@ -1,0 +1,9 @@
+pvl
+pysal
+pandas
+dill
+networkx
+sqlalchemy
+matplotlib
+numpy
+scipy

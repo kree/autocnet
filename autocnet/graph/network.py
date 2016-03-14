@@ -1,3 +1,4 @@
+import itertools
 import os
 import dill as pickle
 
@@ -5,8 +6,6 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 
-from pysal import cg
-from autocnet.examples import get_path
 from autocnet.fileio.io_gdal import GeoDataset
 from autocnet.control.control import C
 from autocnet.fileio import io_json
@@ -15,6 +14,7 @@ import autocnet.matcher.suppression_funcs as spf
 from autocnet.graph.edge import Edge
 from autocnet.graph.node import Node
 from autocnet.vis.graph_view import plot_graph
+
 
 class CandidateGraph(nx.Graph):
     """
@@ -57,15 +57,9 @@ class CandidateGraph(nx.Graph):
 
         nx.relabel_nodes(self, node_labels, copy=False)
 
-
         # Add the Edge class as a edge data structure
         for s, d, edge in self.edges_iter(data=True):
-            if s < d:
-                self.edge[s][d] = Edge(self.node[s], self.node[d])
-            else:
-                self.remove_edge(s, d)
-                self.add_edge(d, s)
-                self.edge[d][s] = Edge(self.node[d], self.node[s])
+            self.edge[s][d] = Edge(self.node[s], self.node[d])
 
     @classmethod
     def from_graph(cls, graph):
@@ -85,9 +79,9 @@ class CandidateGraph(nx.Graph):
             graph = pickle.load(f)
         return graph
 
-# TODO: Add ability to actually read this out of a file?
+
     @classmethod
-    def from_filelist(cls, filelst):
+    def from_filelist(cls, filelist):
         """
         Instantiate the class using a filelist as a python list.
         An adjacency structure is calculated using the lat/lon information in the
@@ -95,8 +89,8 @@ class CandidateGraph(nx.Graph):
 
         Parameters
         ----------
-        filelst : list
-                  A list containing the files (with full paths) to construct an adjacency graph from
+        filelist : list
+                   A list containing the files (with full paths) to construct an adjacency graph from
 
         Returns
         -------
@@ -106,20 +100,24 @@ class CandidateGraph(nx.Graph):
 
         # TODO: Reject unsupported file formats + work with more file formats
 
-        dataset_list = []
-        for file in filelst:
-            dataset = GeoDataset(file)
-            dataset_list.append(dataset)
+        datasets = [GeoDataset(f) for f in filelist]
 
+        # This is brute force for now, could swap to an RTree at some point.
         adjacency_dict = {}
-        for data in dataset_list:
-            adjacent_images = []
-            other_datasets = dataset_list.copy()
-            other_datasets.remove(data)
-            for other in other_datasets:
-                if(cg.standalone.bbcommon(data.bounding_box, other.bounding_box)):
-                    adjacent_images.append(other.base_name)
-            adjacency_dict[data.base_name] = adjacent_images
+
+        for i, j in itertools.permutations(datasets,2):
+            if not i.base_name in adjacency_dict.keys():
+                adjacency_dict[i.base_name] = []
+            if not j.base_name in adjacency_dict.keys():
+                adjacency_dict[j.base_name] = []
+
+            # Grab the footprints and test for intersection
+            i_fp = i.footprint
+            j_fp = j.footprint
+            if i_fp.Intersects(j_fp):
+                adjacency_dict[i.base_name].append(j.base_name)
+                adjacency_dict[j.base_name].append(i.base_name)
+
         return cls(adjacency_dict)
 
 
@@ -151,7 +149,6 @@ class CandidateGraph(nx.Graph):
                 for k, v in input_adjacency.items():
                     input_adjacency[k] = [os.path.join(basepath, i) for i in v]
                     input_adjacency[os.path.join(basepath, k)] = input_adjacency.pop(k)
-#        print(input_adjacency)
         return cls(input_adjacency)
 
     def get_name(self, node_index):
@@ -293,13 +290,17 @@ class CandidateGraph(nx.Graph):
         source_groups = matches.groupby('source_image')
         for i, source_group in source_groups:
             for j, dest_group in source_group.groupby('destination_image'):
-                source_key = dest_group['source_image'].values[0]
-                destination_key = dest_group['destination_image'].values[0]
+                destination_key = int(dest_group['destination_image'].values[0])
+                source_key = int(dest_group['source_image'].values[0])
                 if (source_key, destination_key) in edges:
                     edge = self.edge[source_key][destination_key]
                 else:
                     edge = self.edge[destination_key][source_key]
-
+                    dest_group.rename(columns={'source_image': 'destination_image',
+                                               'source_idx': 'destination_idx',
+                                               'destination_image': 'source_image',
+                                               'destination_idx': 'source_idx'},
+                                      inplace=False)
                 if hasattr(edge, 'matches'):
                     df = edge.matches
                     edge.matches = df.append(dest_group, ignore_index=True)
@@ -349,14 +350,14 @@ class CandidateGraph(nx.Graph):
             edge.compute_fundamental_matrix(clean_keys=clean_keys, **kwargs)
 
     def subpixel_register(self, clean_keys=[], threshold=0.8, upsampling=10,
-                                 template_size=9, search_size=27, tiled=False):
+                                 template_size=9, search_size=27, tiled=False, **kwargs):
          """
          Compute subpixel offsets for all edges using identical parameters
          """
          for s, d, edge in self.edges_iter(data=True):
              edge.subpixel_register(clean_keys=clean_keys, threshold=threshold,
                                     upsampling=upsampling, template_size=template_size,
-                                    search_size=search_size, tiled=tiled)
+                                    search_size=search_size, tiled=tiled, **kwargs)
 
     def suppress(self, clean_keys=[], func=spf.correlation, **kwargs):
         for s, d, e in self.edges_iter(data=True):
@@ -368,6 +369,7 @@ class CandidateGraph(nx.Graph):
 
         Returns
         -------
+
         filelist : list
                    A list where each entry is a string containing the full path to an image in the graph.
         """
@@ -382,6 +384,7 @@ class CandidateGraph(nx.Graph):
 
         Parameters
         ----------
+
         clean_keys : list
              of strings identifying the masking arrays to use, e.g. ratio, symmetry
 
@@ -391,6 +394,7 @@ class CandidateGraph(nx.Graph):
 
         Returns
         -------
+
         merged_cnet : C
                       A control network object
         """
@@ -434,8 +438,10 @@ class CandidateGraph(nx.Graph):
                 matches, mask = edge._clean(clean_keys)
 
             subpixel = False
+            point_type = 2
             if 'subpixel' in clean_keys:
                 subpixel = True
+                point_type = 3
 
             kp1 = self.node[source].keypoints
             kp2 = self.node[destination].keypoints
@@ -448,12 +454,14 @@ class CandidateGraph(nx.Graph):
                 m1 = (source, int(row['source_idx']))
                 m2 = (destination, int(row['destination_idx']))
 
+
                 values.append([kp1.loc[m1_pid]['x'],
                                kp1.loc[m1_pid]['y'],
                                m1,
                                pt_idx,
                                source,
-                               idx])
+                               idx,
+                               point_type])
 
                 if subpixel:
                     kp2x = kp2.loc[m2_pid]['x'] + row['x_offset']
@@ -467,10 +475,11 @@ class CandidateGraph(nx.Graph):
                                m2,
                                pt_idx,
                                destination,
-                               idx])
+                               idx,
+                               point_type])
                 pt_idx += 1
 
-            columns = ['x', 'y', 'idx', 'pid', 'nid', 'mid']
+            columns = ['x', 'y', 'idx', 'pid', 'nid', 'mid', 'point_type']
 
             cnet = C(values, columns=columns)
 
@@ -511,7 +520,7 @@ class CandidateGraph(nx.Graph):
         Write the edge structure to a JSON adjacency list
 
         Parameters
-        ==========
+        ----------
 
         outputfile : str
                      PATH where the JSON will be written
@@ -538,8 +547,9 @@ class CandidateGraph(nx.Graph):
 
         Returns
         -------
-       : list
-          A list of connected sub-graphs of nodes, with the largest sub-graph first. Each subgraph is a set.
+
+         : list
+           A list of connected sub-graphs of nodes, with the largest sub-graph first. Each subgraph is a set.
         """
         return sorted(nx.connected_components(self), key=len, reverse=True)
 

@@ -1,12 +1,17 @@
+import json
+import warnings
+
+import pvl
 import os
 
 from pysal.cg.shapes import Polygon
+from autocnet.utils.utils import find_in_dict
+from osgeo import ogr
 import numpy as np
 import gdal
 import osr
 
 from autocnet.fileio import extract_metadata
-from pysal import cg
 
 gdal.UseExceptions()
 
@@ -29,6 +34,7 @@ for k, v in iter(NP2GDAL_CONVERSION.items()):
     GDAL2NP_CONVERSION[v] = k
 
 GDAL2NP_CONVERSION[1] = 'int8'
+
 
 class GeoDataset(object):
     """
@@ -120,6 +126,12 @@ class GeoDataset(object):
     no_data_value : float
                     Special value used to indicate pixels that are not valid.
 
+    metadata : dict
+               A dictionary of available image metadata
+
+    footprint : object
+                An OGR footprint object
+
     """
     def __init__(self, file_name):
         """
@@ -191,11 +203,59 @@ class GeoDataset(object):
     @property
     def latlon_extent(self):
         if not getattr(self, '_latlon_extent', None):
-            xy_extent = self.xy_extent
-            lowerlat, lowerlon = self.pixel_to_latlon(xy_extent[0][0], xy_extent[0][1])
-            upperlat, upperlon = self.pixel_to_latlon(xy_extent[1][0], xy_extent[1][1])
+            try:
+                fp = self.footprint
+                # If we have a footprint, no need to compute pixel to latlon
+                lowerlat, upperlat, lowerlon, upperlon = fp.GetEnvelope()
+            except:
+                xy_extent = self.xy_extent
+                lowerlat, lowerlon = self.pixel_to_latlon(xy_extent[0][0], xy_extent[0][1])
+                upperlat, upperlon = self.pixel_to_latlon(xy_extent[1][0], xy_extent[1][1])
+                geom = {"type": "Polygon", "coordinates": [[[lowerlat, lowerlon],
+                                                           [lowerlat, upperlon],
+                                                           [upperlat, upperlon],
+                                                           [upperlat, lowerlon],
+                                                           [lowerlat, lowerlon]]]}
             self._latlon_extent = [(lowerlat, lowerlon), (upperlat, upperlon)]
         return self._latlon_extent
+
+    @property
+    def metadata(self):
+        if not hasattr(self, '_metadata'):
+            try:
+                self._metadata = pvl.load(self.file_name)
+            except:
+                self._metadata = self.dataset.GetMetadata()
+        return self._metadata
+
+    @property
+    def footprint(self):
+        if not hasattr(self, '_footprint'):
+            try:
+                polygon_pvl = find_in_dict(self.metadata, 'Polygon')
+                start_polygon_byte = find_in_dict(polygon_pvl, 'StartByte')
+                num_polygon_bytes = find_in_dict(polygon_pvl, 'Bytes')
+
+                # I too dislike the additional open here.  Not sure a good option
+                with open(self.file_name, 'r+') as f:
+                    f.seek(start_polygon_byte - 1)
+                    # Sloppy unicode to string because GDAL pukes on unicode
+                    stream = str(f.read(num_polygon_bytes))
+                    self._footprint = ogr.CreateGeometryFromWkt(stream)
+            except:
+                # I dislike that this is copied from latlonext, but am unsure
+                # how to avoid the cyclical footprint to latlon_extent property hits.
+                xy_extent = self.xy_extent
+                lowerlat, lowerlon = self.pixel_to_latlon(xy_extent[0][0], xy_extent[0][1])
+                upperlat, upperlon = self.pixel_to_latlon(xy_extent[1][0], xy_extent[1][1])
+                geom = {"type": "Polygon", "coordinates": [[[lowerlat, lowerlon],
+                                                           [lowerlat, upperlon],
+                                                           [upperlat, upperlon],
+                                                           [upperlat, lowerlon],
+                                                           [lowerlat, lowerlon]]]}
+                self._footprint = ogr.CreateGeometryFromJson(json.dumps(geom))
+
+        return self._footprint
 
     @property
     def xy_extent(self):
@@ -210,19 +270,6 @@ class GeoDataset(object):
             self._xy_extent = [(minx, miny), (maxx, maxy)]
 
         return self._xy_extent
-
-    @property
-    def bounding_box(self):
-        """
-        A bounding box in lat/lon space
-        Returns
-        -------
-
-        """
-        if not getattr(self, '_bounding_box', None):
-            latlons = self.latlon_extent # Will fail without geospatial data
-            self._bounding_box = cg.standalone.get_bounding_box([cg.shapes.LineSegment(latlons[0], latlons[1])])
-        return self._bounding_box
 
     @property
     def pixel_polygon(self):
@@ -338,10 +385,14 @@ class GeoDataset(object):
                    (Latitude, Longitude) corresponding to the given (x,y).
         
         """
-        geotransform = self.geotransform
-        x = geotransform[0] + (x * geotransform[1]) + (y * geotransform[2])
-        y = geotransform[3] + (x * geotransform[4]) + (y * geotransform[5])
-        lon, lat, _ = self.coordinate_transformation.TransformPoint(x, y)
+        try:
+            geotransform = self.geotransform
+            x = geotransform[0] + (x * geotransform[1]) + (y * geotransform[2])
+            y = geotransform[3] + (x * geotransform[4]) + (y * geotransform[5])
+            lon, lat, _ = self.coordinate_transformation.TransformPoint(x, y)
+        except:
+            lat = lon = None
+            warnings.warn('Unable to compute pixel to geographic conversion without projection information.')
 
         return lat, lon
 

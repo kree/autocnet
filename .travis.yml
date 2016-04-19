@@ -40,7 +40,20 @@ install:
   - pip install coverage
   - pip install coveralls
 
+  # Set up area for notebook-testing
+  - NOTEBOOKS="autocnet/notebooks"
+
 script:
+  # Run ipython notebook CI-testing
+  - df -kh .
+  - wget https://raw.githubusercontent.com/marcusbooyah/IPy-CI/master/scripts/dl.sh -P ./scripts
+  - source ./scripts/dl.sh
+  - source ./scripts/prepare.sh
+  - export PATH="$PWD/miniconda/bin:$PATH"
+  - source ./scripts/getfiles.sh
+  - source ./scripts/runipy.sh
+
+  # Run nosetests
   - nosetests --with-coverage --cover-package=autocnet
 
 after_success:

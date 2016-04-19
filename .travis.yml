@@ -53,14 +53,14 @@ script:
   - source ./scripts/dl.sh
   #- source ./scripts/prepare.sh #This just sets up miniconda, which we already have (.. but might do more setup?)
   #- export PATH="$PWD/miniconda/bin:$PATH" #redundant?
-  #- source ./scripts/getfiles.sh
+  - source ./scripts/getfiles.sh
   - source ./scripts/runipy.sh
 
   # Run nosetests
   - nosetests --with-coverage --cover-package=autocnet
 
-after_success:
-  - coveralls
+#after_success:
+#  - coveralls
 
 after_deploy:
   - exit $ERROR

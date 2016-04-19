@@ -41,8 +41,9 @@ install:
   - pip install coveralls
 
   # Set up area for notebook-testing
+  - echo "SETTING UP NOTEBOOK TESTING"
   - echo $TRAVIS_PULL_REQUEST
-  - NOTEBOOKS="autocnet/notebooks"
+  - NOTEBOOKS=""
   - d=`TZ=":US/Pacific" date +%y-%m-%d----%H:%M:%S`
 
 script:
@@ -50,8 +51,8 @@ script:
   - df -kh .
   - wget https://raw.githubusercontent.com/marcusbooyah/IPy-CI/master/scripts/dl.sh -P ./scripts
   - source ./scripts/dl.sh
-  - source ./scripts/prepare.sh
-  - export PATH="$PWD/miniconda/bin:$PATH"
+  #- source ./scripts/prepare.sh #This just sets up miniconda, which we already have (.. but might do more setup?)
+  #- export PATH="$PWD/miniconda/bin:$PATH" #redundant?
   - source ./scripts/getfiles.sh
   - source ./scripts/runipy.sh
 

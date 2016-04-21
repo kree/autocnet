@@ -8,66 +8,17 @@ only:
 python:
   - "3.5"
 
-before_install:
-
 install:
-  # We do this conditionally because it saves us some downloading if the
-  # version is the same.
-  - if [[ "$TRAVIS_PYTHON_VERSION" == "2.7" ]]; then
-      wget https://repo.continuum.io/miniconda/Miniconda-latest-Linux-x86_64.sh -O miniconda.sh;
-    else
-      wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh;
-    fi
-  - bash miniconda.sh -b -p $HOME/miniconda
-  - export PATH="$HOME/miniconda/bin:$PATH"
-  - hash -r
-  - conda config --set always_yes yes --set changeps1 no
-  - conda update -q conda
-  # Useful for debugging any issues with conda
-  - conda info -a
-
-  # Create a virtual env and install dependencies
-  - conda create -y -q -n test-env python=$TRAVIS_PYTHON_VERSION nose numpy pillow scipy pandas networkx scikit-image sqlalchemy numexpr dill cython pyyaml
-  # Activate the env
-  - source activate test-env
-
-  # Install the non-conda packages if required, requirements.txt duplicates are ignored
-  - conda install -c https://conda.anaconda.org/jlaura opencv3=3.0.0
-  - conda install -c https://conda.anaconda.org/jlaura h5py gdal
-  - conda install -c osgeo proj4
-  - conda upgrade numpy
-  - pip install -r requirements.txt
-  - pip install coverage
-  - pip install coveralls
-
-  # Set up area for notebook-testing
-  - echo "SETTING UP NOTEBOOK TESTING"
   - echo $TRAVIS_PULL_REQUEST
   - NOTEBOOKS=""
   - d=`TZ=":US/Pacific" date +%y-%m-%d----%H:%M:%S`
-
 script:
-  # Run ipython notebook CI-testing
   - df -kh .
   - wget https://raw.githubusercontent.com/marcusbooyah/IPy-CI/master/scripts/dl.sh -P ./scripts
   - source ./scripts/dl.sh
-  #- source ./scripts/prepare.sh #This just sets up miniconda, which we already have (.. but might do more setup?)
-  #- export PATH="$PWD/miniconda/bin:$PATH" #redundant?
+  - source ./scripts/prepare.sh
+  - export PATH="$PWD/miniconda/bin:$PATH"
   - source ./scripts/getfiles.sh
   - source ./scripts/runipy.sh
-
-  # Run nosetests
-  - nosetests --with-coverage --cover-package=autocnet
-
-#after_success:
-#  - coveralls
-
 after_deploy:
   - exit $ERROR
-
-notifications:
-  email:
-      recipients:
-          - kberry@usgs.gov
-      on_success: always
-      on_failure: always
